@@ -5,9 +5,10 @@ import streamlit as st
 import folium
 from streamlit_folium import st_folium
 
+# Definimos el título y el layout de la página
 st.set_page_config(page_title="Greedy Routing Map", layout="wide")
 
-# Background
+# Formatos generales
 st.markdown(
     """
     <style>
@@ -45,7 +46,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# -------- Session state initialization --------
+# Inicialización de la sesión (auxiliares)
 if "route" not in st.session_state:
     st.session_state.route = None
 if "total_km" not in st.session_state:
@@ -54,28 +55,29 @@ if "df_used" not in st.session_state:
     st.session_state.df_used = None
 
 # Funciones
-# -------------------- Distance (Haversine) --------------------
+# Cálculo de la distancia (Harvesine)
 def haversine_km(lat1, lon1, lat2, lon2):
-    R = 6371.0088
+    R = 6371.0088 # Curvatura (fijo)
     lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
     dlat = lat2 - lat1
     dlon = lon2 - lon1
-    a = np.sin(dlat / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2) ** 2
+    a = np.sin(dlat / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2) ** 2 # Fórmula de cálculo de la distancia
     return 2 * R * np.arcsin(np.sqrt(a))
 
+# Cálculo de la matriz de distancias en una matriz (pares de distancias)
 def pairwise_distance_matrix(df, lat_col="lat", lon_col="lon"):
     n = len(df)
-    D = np.zeros((n, n), dtype=float)
+    D = np.zeros((n, n), dtype=float) # Rellenamos la matriz con ceros (matriz cuadrada)
     lats = df[lat_col].to_numpy()
     lons = df[lon_col].to_numpy()
     for i in range(n):
         for j in range(i + 1, n):
-            d = haversine_km(lats[i], lons[i], lats[j], lons[j])
-            D[i, j] = d
+            d = haversine_km(lats[i], lons[i], lats[j], lons[j]) # Para cada par calculamos su distancia y llevamos a la matriz
+            D[i, j] = d # Dejamos las distancias simétricas (i,j) = (j,i)
             D[j, i] = d
     return D
 
-# -------------------- Greedy Route --------------------
+# Ruteo con algoritmo Greedy
 def greedy_route(df, start_idx=0, return_to_start=False, lat_col="lat", lon_col="lon"):
     df = df.reset_index(drop=True).copy()
     n = len(df)
@@ -86,14 +88,14 @@ def greedy_route(df, start_idx=0, return_to_start=False, lat_col="lat", lon_col=
 
     D = pairwise_distance_matrix(df, lat_col=lat_col, lon_col=lon_col)
 
-    unvisited = set(range(n))
+    unvisited = set(range(n)) # Nodos no visitados
     route = [start_idx]
     unvisited.remove(start_idx)
     total = 0.0
     current = start_idx
 
     while unvisited:
-        nxt = min(unvisited, key=lambda j: D[current, j])
+        nxt = min(unvisited, key=lambda j: D[current, j]) # Se rellena la ruta con el siguiente mínimo
         total += D[current, nxt]
         route.append(nxt)
         unvisited.remove(nxt)
@@ -105,7 +107,7 @@ def greedy_route(df, start_idx=0, return_to_start=False, lat_col="lat", lon_col=
 
     return route, total
 
-# -------------------- Map Builder --------------------
+# Generación del mapa con Leaflet
 def build_route_map(df, route, lat_col="lat", lon_col="lon", name_col=None):
     df = df.reset_index(drop=True)
     coords = [[df.loc[i, lat_col], df.loc[i, lon_col]] for i in route]
@@ -113,7 +115,7 @@ def build_route_map(df, route, lat_col="lat", lon_col="lon", name_col=None):
 
     m = folium.Map(location=center, zoom_start=12, tiles="OpenStreetMap")
 
-    # Add markers with visit order
+    # Añadimos los marcadores con visitas en el orden establecido
     for step, i in enumerate(route):
         label = f"{step}"
         if name_col and name_col in df.columns:
@@ -147,9 +149,10 @@ def build_route_map(df, route, lat_col="lat", lon_col="lon", name_col=None):
     # Fit bounds nicely
     m.fit_bounds(coords)
     return m
+    
 # ===================== UI =====================
 # Eliminado ya que se cambia al principio
-#st.title("Greedy Routing (Nearest-Neighbor) + Leaflet Map")
+# st.title("Greedy Routing (Nearest-Neighbor) + Leaflet Map")
 
 st.markdown(
     """
@@ -205,7 +208,7 @@ else:
     if use_name:
         name_col = st.selectbox("Etiqueta", col_candidates, key="label_col_select")
 
-# Clean + validate
+# Validación y limpieza
 df2 = df.copy()
 
 # Convert to numeric (coerce invalid to NaN)
@@ -218,7 +221,6 @@ if len(df2) < 2:
     st.error("Need at least 2 valid locations after cleaning lat/lon.")
     st.stop()
 
-# Start selection
 st.subheader("Opciones de ruteo")
 
 if name_col and name_col in df2.columns:
@@ -237,7 +239,6 @@ else:
 
 return_to_start = st.checkbox("Volver al inicio (loop cerrado)", value=False, key="return_to_start_checkbox")
 
-# Run button
 compute = st.button("Obtener la ruta basado en un algoritmo Greedy", key="compute_button")
 
 if compute:
@@ -249,12 +250,11 @@ if compute:
         lon_col=lon_col,
     )
 
-    # Store results for later reruns
     st.session_state.route = route
     st.session_state.total_km = total_km
     st.session_state.df_used = df2.copy()
 
-# -------- Persistent display --------
+# Ajuste para display persistente
 if st.session_state.route is not None:
     st.success(f"Distancia total: {st.session_state.total_km:.2f} km")
 
@@ -279,8 +279,8 @@ if st.session_state.route is not None:
     folium.PolyLine(coords, weight=4).add_to(m)
     m.fit_bounds(coords)
 
-    # IMPORTANT: stable key prevents remount flicker
     st_folium(m, width=900, height=600, key="route_map")
+
 
 
 
